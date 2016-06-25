@@ -10,35 +10,38 @@ Run `connect(...)` before executing any statements.
 
 ```js
 cassandra.connect({
-  contactPoints: ['h1', 'h2'],
-  keyspace: 'ks1',
+  contactPoints: ['localhost'],
 });
 ```
 
 Available options are all cassandra-driver [ClientOptions](http://docs.datastax.com/en/drivers/nodejs/3.0/global.html#ClientOptions).
 
-## Create/drop keyspace
+## createKeyspace(...)
 
 ```js
 cassandra.createKeyspace('test', 'NetworkTopologyStrategy')
   .then(() => console.log('Keyspace "test" created'));
 ```
 
+A `USE {keyspace}` statement is executed afterwards.
+
+## dropKeyspace(...)
+
 ```js
 cassandra.dropKeyspace('test')
   .then(() => console.log('Keyspace "test" created'));
 ```
 
-## Execute
+## execute(...)
 
 ```js
 cassandra.execute(`SELECT * FROM users WHERE id=?`, ['a813g1e'], { prepare: true })
   .then((result) => console.log('Result', result));
 ```
 
-## Prepared insert
+## preparedInsert(...)
 
-Create a prepared INSERT statement based on an object.
+Creates a prepared INSERT statement based on an object by mapping its keys to fields.
 
 You can use this for update statements as well because Cassandra's INSERT and UPDATE are almost identical with the exception of counter columns.
 
@@ -63,7 +66,7 @@ Option    | Default | Description
 notExists | `false` | Adds IF NOT EXISTS clause to prepared query
 ttl       | `null`  | umber of seconds after which record is deleted. Set `null` to never expire data.
 
-## Batch execute
+## batch(..)
 
 Batch method is a minimal wrapper around [nodejs-cassandra](https://github.com/datastax/nodejs-driver)'s `batch` statement. It returns a promise with the result of the BATCH operation.
 

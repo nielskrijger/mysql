@@ -1,5 +1,5 @@
 {
-  "name": "@nielskrijger/cassnadra",
+  "name": "@nielskrijger/cassandra",
   "version": "0.1.0",
   "description": "Wrapper for Node.js cassandra driver",
   "main": "dist/index.js",
