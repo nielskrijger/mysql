@@ -1,6 +1,6 @@
 # Cassandra
 
-A set of convenience methods for [nodejs-cassandra](https://github.com/datastax/nodejs-driver).
+A wrapper for [nodejs-cassandra](https://github.com/datastax/nodejs-driver) library, providing promises and a set of convenience methods.
 
 **NOTE**: this library is not very customizable nor will it be, its intent is to serve as a standard for my personal projects. There are only few tests because its use is extensively tested in component tests.
 
@@ -89,9 +89,9 @@ Option    | Default | Description
 prepare   | `false` | Queries are prepared statements.
 logged    | `true`  | Whether batch should be written to the batchlog.
 
-Be aware batch in Cassandra is not a performance improvement in most cases, rather it provided atomic transactions; either all operations succeed or none.
+Be aware batch in Cassandra is not a performance improvement in most situations, instead it provides support for atomic transactions (either all operations succeed or none).
 
-The one exception an unlogged batch provides performance benefits is when a set of writes are written to the same partition.
+The one exception a batch does improve performance is when a set of writes are written to the same partition.
 
 ## Logging
 
