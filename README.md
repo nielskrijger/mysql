@@ -1,111 +1,98 @@
-# Cassandra
+# Mysql
 
-A wrapper for [nodejs-cassandra](https://github.com/datastax/nodejs-driver) library, providing promises and a set of convenience methods.
+A wrapper for the [Node.js mysql](https://github.com/mysqljs/mysql) library, providing promises and a set of convenience methods.
 
-**NOTE**: this library is not very customizable nor will it be, its intent is to serve as a standard for my personal projects. There are only few tests because its use is extensively tested in component tests.
+**NOTE**: this library is not very customizable nor will it be, its intent is to serve as a standard for my personal projects. There are only few tests because its use is extensively tested in other projects.
 
-## Connect
+## connect(...)
 
-Run `connect(...)` before executing any statements.
+Connect creates a connection pool to the MySQL server and must be called before any other commands.
+
+Connect simply passes the specified connection options to [mysql.createPool()](https://github.com/mysqljs/mysql#pooling-connections).
 
 ```js
-cassandra.connect({
-  contactPoints: ['localhost'],
+import { connect } from '@nielskrijger/mysql';
+
+connect({
+  connectionLimit: 10,
+  host: '127.0.0.1',
+  user: 'root',
+  password: 'root',
+  database: 'my_database',
 });
 ```
 
-Available options are all cassandra-driver [ClientOptions](http://docs.datastax.com/en/drivers/nodejs/3.0/global.html#ClientOptions).
+## query(...)
 
-## createKeyspace(...)
+Executes a query and automatically releases connection when done.
 
 ```js
-cassandra.createKeyspace('test', 'NetworkTopologyStrategy')
-  .then(() => console.log('Keyspace "test" created'));
+import { QueryOptions } from '@nielskrijger/mysql';
+
+const sql = 'SELECT * FROM users WHERE id = ?';
+query(sql, ['1g0fee'])
+  .then(result => {
+    console.log(result);
+  });
 ```
 
-A `USE {keyspace}` statement is executed afterwards.
+## transaction(...)
 
-## dropKeyspace(...)
+Executes a bunch of queries atomically (all or nothing).
 
-```js
-cassandra.dropKeyspace('test')
-  .then(() => console.log('Keyspace "test" created'));
-```
+The transaction is committed automatically when all queries succeeded or rolled back if any failed.
 
-## execute(...)
+Example:
 
 ```js
-cassandra.execute(`SELECT * FROM users WHERE id=?`, ['a813g1e'], { prepare: true })
-  .then((result) => console.log('Result', result));
-```
+import { transaction } from '@nielskrijger/mysql';
 
-## preparedInsert(...)
-
-Creates a prepared INSERT statement based on an object by mapping its keys to fields.
-
-You can use this for update statements as well because Cassandra's INSERT and UPDATE are almost identical with the exception of counter columns.
-
-```js
-const query = cassandra.preparedInsert('users', {
-  id: 'a7509gd',
-  first_name: 'John',
-  last_name: 'Doe',
-}, { ttl: 3600 * 24 * 31, notExists: true });
-
-/*
-{
-  query: 'INSERT INTO users (first_name, id, last_name) VALUES (?, ?, ?) IF NOT EXISTS USING TTL 2678400',
-  params: [ 'John', 'a7509gd', 'Doe' ]
-}
-*/
-console.log(query);
-```
-
-Option    | Default | Description
-----------|---------|------------------
-notExists | `false` | Adds IF NOT EXISTS clause to prepared query
-ttl       | `null`  | umber of seconds after which record is deleted. Set `null` to never expire data.
-
-## batch(..)
-
-Batch method is a minimal wrapper around [nodejs-cassandra](https://github.com/datastax/nodejs-driver)'s `batch` statement. It returns a promise with the result of the BATCH operation.
-
-```js
 const queries = [{
-  query: 'UPDATE users SET name=? WHERE id=?',
-  params: ['John', 'ae835x'],
-}, {
   query: 'INSERT INTO users (id, name, created) VALUES (?, ?, ?)',
   params: ['1g0fee', 'hendrix', new Date()],
+}, {
+  query: 'INSERT INTO emails (user_id, email) VALUES (?, ?)',
+  params: ['1g0fee', 'johndoe@example.com'],
 }];
 
-cassandra.batch(queries, { prepare: true }).catch(err => {
-  assert.ifError(err);
-  console.log('Data updated on cluster');
-});
+transaction(queries)
+  .then(results => {
+    console.log(results);
+  })
+  .catch(err => {
+    console.err('Error occured, transaction was rolled back', err);
+  });
 ```
 
-The most common options are listed below, you can find more [here](http://docs.datastax.com/en/drivers/nodejs/3.0/global.html#QueryOptions).
+## now()
 
-Option    | Default | Description
-----------|---------|-----------------------------
-prepare   | `false` | Queries are prepared statements.
-logged    | `true`  | Whether batch should be written to the batchlog.
+Returns the current timestamp in a MySQL date format ('YYYY-MM-DD HH:mm:ss.SSS').
 
-Be aware batch in Cassandra is not a performance improvement in most situations, instead it provides support for atomic transactions (either all operations succeed or none).
+## pickWithPrefix(...) and pickWithoutPrefix(...)
 
-The one exception a batch does improve performance is when a set of writes are written to the same partition.
+When joining tables often you'll find columns have the same name and only one of them is returned. To prevent this a pattern I've adopted is aliasing all columns of one table with a prefix. `pickWithPrefix(...)` and `pickWithoutPrefix(...)` are helpers methods to parse such a result.
 
-## Logging
+While this may be cumbersome, I've preferred it over ORMs in smaller projects.
+
+Example:
 
 ```js
-import * as cassandra from '@nielskrijger/cassandra';
+import {
+  query,
+  pickWithPrefix,
+  pickWithoutPrefix,
+} from '@nielskrijger/mysql';
 
-cassandra.on('log', (level, message, object) => {
-  console.log(`Log event: ${level}, ${message}, ${object}`);
-});
+const sql = `
+  SELECT a.name AS a_name, b.*
+  FROM users a
+  INNER JOIN groups g ON a.id = b.user_id
+  WHERE a.id = ?`;
+query(sql, ['1g0fee'])
+  .then(rows => {
+    return Object.assign(
+      pickWithPrefix(rows[0], 'a_'),
+      groups: rows.map(pickWithoutPrefix),
+    );
+  });
 ```
-
-A `debug` log event is emitted when executing a statement or a batch of statements. An `info` log event is emitted when connection was established.
-
-Errors must be handled by the client as part of the Promise chain, no log events are emitted.

@@ -1,10 +1,14 @@
 {
-  "name": "@nielskrijger/cassandra",
+  "name": "@nielskrijger/mysql",
   "version": "0.1.0",
-  "description": "Wrapper for Node.js cassandra driver",
+  "description": "Wrapper for Node.js mysql driver",
   "main": "dist/index.js",
   "author": "Niels Krijger <niels@kryger.nl>",
   "license": "ISC",
+  "repository" : {
+    "type" : "git",
+    "url" : "https://github.com/nielskrijger/mysql.git"
+  },
   "devDependencies": {
     "babel-cli": "^6.10.1",
     "babel-core": "^6.10.4",
@@ -18,7 +22,7 @@
     "prepublish": "npm test && npm run build"
   },
   "dependencies": {
-    "bluebird": "^3.4.1",
-    "cassandra-driver": "^3.0.2"
+    "moment": "^2.14.1",
+    "mysql": "^2.11.1"
   }
 }

@@ -1,117 +1,119 @@
-import cassandra from 'cassandra-driver';
-import bluebird from 'bluebird';
-import EventEmitter from 'events';
+/* eslint-disable prefer-rest-params */
+import mysql from 'mysql';
+import moment from 'moment';
 
-let client = null;
-const eventEmitter = new EventEmitter();
+let pool = null;
 
 /**
- * Establishes a connection to the cassandra server.
+ * Creates a connection pool to the mysql server.
  *
  * Connect should be called at most once.
  */
-export function connect(config) {
-  client = new cassandra.Client(config);
-  bluebird.promisifyAll(client);
+export function connect(options) {
+  pool = mysql.createPool(options);
 }
 
 /**
- * Adds event listener to the end of the listeners array for the event named
- * `eventName`.
- *
- * Returns a reference to the EventEmitter so calls can be chained.
+ * Returns the current timestamp in UTC as a MySQL string.
  */
-export function on(eventName, listener) {
-  eventEmitter.on(eventName, listener);
-  return eventEmitter;
+export function now() {
+  return moment.utc().format('YYYY-MM-DD HH:mm:ss.SSS');
 }
 
 /**
- * Executes cassandra query on active client.
- *
- * Make sure `init()` is called beforehand to establish connection.
- *
- * Returns a promise with the query result.
+ * Returns a new object with all properties in `row` that start with specified
+ * `prefix`. The returned object strips the prefix from its properties.
  */
-export function execute(query, params, options) {
-  if (!client) throw new Error('Must call connect(...) first');
-  eventEmitter.emit('log', 'debug', 'Cassandra execute', { query, params, options });
-  return client.executeAsync(query, params, options);
-}
-
-/**
- * Executes a batch of statements in Cassandra.
- *
- * This method defaults to a LOGGED BATCH with statements where prepared `statements` are formatted as follows:
- *
- * ```js
- * [{
- *   query: 'UPDATE user_profiles SET email=? WHERE key=?',
- *   params: [emailAddress, 'hendrix']
- * }]
- * ```
- */
-export function batch(statements, options = {}) {
-  if (!client) throw new Error('Must call connect(...) first');
-  eventEmitter.emit('log', 'debug', 'Cassandra batch', { statements, options })
-  return client.batchAsync(statements, options);
-}
-
-/**
- * Creates a prepared INSERT statement.
- */
-export function preparedInsert(table, object, options = {}) {
-  const opts = Object.assign({}, {
-    notExists: false,
-    ttl: null,
-  }, options);
-  const objectKeys = Object.keys(object);
-  objectKeys.sort(); // Ensure prepared statement is always identical to improve efficiency on database server
-
-  // Generate columns and values
-  const params = [];
-  let columns = '';
-  let values = '';
-  for (const key of objectKeys) {
-    if (columns.length > 0) {
-      columns += ', ';
-      values += ', ';
+export function pickWithPrefix(row, prefix) {
+  const result = {};
+  Object.keys(row).forEach(prop => {
+    if (prop.startsWith(prefix)) {
+      result[prop.substring(prefix.length)] = row[prop];
     }
-    columns += key;
-    values += '?';
-    params.push(object[key]);
-  }
-  let query = `INSERT INTO ${table} (${columns}) VALUES (${values})`;
-  if (opts.notExists) query += ' IF NOT EXISTS';
-  if (opts.ttl) query += ` USING TTL ${opts.ttl}`;
-  return { query, params };
+  });
+  return result;
 }
 
 /**
- * Creates Cassandra keyspace if it not already exists.
- *
- * Will execute a `USE <keyspace>` afterwards to ensure all connections are
- * targetting the same keyspace.
+ * Returns a new object with all properties in `row` that do not start with
+ * specified `prefix`.
  */
-export function createKeyspace(keyspace, replicationClass) {
-  eventEmitter.emit('log', 'info', `Creating cassandra '${keyspace}' keyspace (if not exists)`)
-  // Ensure query only contains single quotes rather than double quotes (avoid JSON.stringify)
-  let statement = `CREATE KEYSPACE IF NOT EXISTS ${keyspace}`;
-  if (replicationClass === 'SimpleStrategy') {
-    statement += ' WITH REPLICATION = {\'class\': \'SimpleStrategy\', \'replication_factor\' : 1};';
-  } else {
-    statement += ' WITH REPLICATION = {\'class\': \'NetworkTopologyStrategy\'};';
-  }
-
-  return execute(statement)
-    .then(() => execute(`USE ${keyspace};`));
+export function pickWithoutPrefix(row, prefix) {
+  const result = {};
+  Object.keys(row).forEach(prop => {
+    if (!prop.startsWith(prefix)) {
+      result[prop] = row[prop];
+    }
+  });
+  return result;
 }
 
 /**
- * Immediately and irreversible removes the application's keyspace, including
- * all tables and data contained in the keyspace.
+ * Executes a query and automatically releases connection when done.
  */
-export function dropKeyspace(keyspace) {
-  const query = `DROP KEYSPACE IF EXISTS ${keyspace};`;
-  return execute(query);
+export function query() {
+  if (!pool) throw new Error('Must first call mysql.connect(...)');
+
+  return new Promise((resolve, reject) => {
+    pool.getConnection((err, conn) => {
+      if (err) return reject(err);
+      const args = Array.from(arguments);
+
+      // Add callback method to process query result and release connection
+      args.push((err2, rows) => {
+        conn.release(); // Always release connection regardless what happens
+        if (err2) return reject(err2);
+
+        return resolve(rows);
+      });
+      return conn.query(...args);
+    });
+  });
+}
+
+/**
+ * Executes a bunch of queries atomically (all or nothing).
+ */
+export function transaction(queries) {
+  if (!pool) throw new Error('Must first call mysql.connect(...)');
+
+  return new Promise((resolveTransaction, rejectTransaction) => {
+    pool.getConnection((err, conn) => {
+      if (err) return rejectTransaction(err);
+      return conn.beginTransaction(err2 => {
+        if (err2) return rejectTransaction(err);
+
+        // Executes a query, returns a promise.
+        function executeQuery() {
+          return new Promise((resolve, reject) => {
+            const args = Array.from(arguments);
+
+            // Add callback method to process query result and release connection
+            args.push((err3, rows) => {
+              if (err3) return reject(err3);
+              return resolve(rows);
+            });
+            conn.query(...args);
+          });
+        }
+
+        // Execute queries in sequence, MySQL protocol does not support parallel queries
+        const querySequence = queries.reduce((promise, statement) => {
+          return promise.then(() => executeQuery(statement.query, statement.params));
+        }, Promise.resolve());
+        return querySequence.then(() => {
+          conn.commit(err3 => {
+            if (err3) throw err3;
+            conn.release();
+            return resolveTransaction();
+          });
+        }).catch(err4 => {
+          conn.rollback(() => {
+            conn.release();
+            return rejectTransaction(err4);
+          });
+        });
+      });
+    });
+  });
 }
