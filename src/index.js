@@ -117,3 +117,24 @@ export function transaction(queries) {
     });
   });
 }
+
+/**
+ * Gracefully ends all connections.
+ */
+export function cleanup() {
+  if (pool !== null) {
+    pool.end(err => {
+      if (err) {
+        throw new Error('Failed closing pool connections gracefully', err);
+      }
+    });
+  }
+}
+
+// Cleanup when app is closing
+process.on('exit', cleanup);
+
+// Catches ctrl+c event
+process.on('SIGINT', cleanup);
+
+// We do not clean up when UncaughtException is found
